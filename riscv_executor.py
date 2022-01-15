@@ -1,7 +1,8 @@
 import sys
 
-instructions = []  # bytes array
-x = [0 for x in range(32)]  # registers x0-x31
+memory = []  # bytes array
+# x = [0 for x in range(32)]  # registers x0-x31
+x = [0] * 32
 pc = 0  # program counter register
 
 
@@ -15,11 +16,26 @@ def from_two_s_compl_bin_to_int(bits, nrBits):
 
 
 def write_back(rd, res):
-    x[rd] = res
+    if rd != 0:
+        x[rd] = res
 
-def memory_access(res):
+
+def write_back_mem(val, addr):
+    val = hex(val)
+    memory[addr] = val[2:4]
+    memory[addr + 1] = val[4:6]
+    memory[addr + 2] = val[6:8]
+    memory[addr + 3] = val[8:10]
+
+
+def memory_access_pc(res):
     global pc
-    pc = res
+    pc = res - 4
+
+
+def memory_access_load(addr):
+    return "".join(memory[addr:addr + 4])
+
 
 def execute_ori(rs1, rs2, rd):
     res = x[rs1] | x[rs2]
@@ -47,12 +63,19 @@ def execute_rem(rs1, rs2, rd):
 
 def execute_addi(imm, rs1, rd):
     res = x[rs1] + imm
+    if res > ((1 << 31) - 1):
+        res -= (1 << 31) - 1
+        res = -(1 << 31) + res - 1
+    if res < (-(1 << 31)):
+        res = -(res + (1 << 31))
+        res = (1 << 31) - 1 - res + 1
     write_back(rd, res)
 
 
 def execute_slli(shamt, rs1, rd):
     res = x[rs1] << shamt
     write_back(rd, res)
+
 
 def execute_srli(shamt, rs1, rd):
     bits = '{:032b}'.format(x[rs1])
@@ -61,39 +84,40 @@ def execute_srli(shamt, rs1, rd):
     res = int(bits, 2)
     write_back(rd, res)
 
+
 def execute_srai(shamt, rs1, rd):
     res = x[rs1] >> shamt
     write_back(rd, res)
 
 
 def execute_lw(imm, rs1, rd):
-    if x[rs1] < imm: # ???
-        x[rd] = 1
-    else:
-        x[rd] = 0
+    addr = imm + x[rs1]
+    res = int(memory_access_load(addr), 16)
+    write_back(rd, res)
 
 
 def execute_beq(imm, rs1, rs2):
     if x[rs1] == x[rs2]:
         global pc
-        res = pc + imm * 2 - 4
-        memory_access(res)
+        res = pc + imm * 2
+        memory_access_pc(res)
 
 
 def execute_bne(imm, rs1, rs2):
     if x[rs1] != x[rs2]:
         global pc
-        res = pc + imm * 2 - 4
-        memory_access(res)
+        res = pc + imm * 2
+        memory_access_pc(res)
 
 
 def execute_jal(offset, rd):
     global pc
     new_pc = pc + offset * 2
-    memory_access(new_pc)
+    memory_access_pc(new_pc)
     if rd != 0:
         res = pc + 4
         write_back(rd, res)
+
 
 def execute_lui(imm, rd):
     res = from_two_s_compl_bin_to_int(imm + "0" * 12, 32)
@@ -108,15 +132,33 @@ def execute_auipc(imm, rd):
 
 
 def execute_sw(imm, rs1, rs2):
-    res = x[rs1] + imm
-    write_back(rs2, res)
+    x[rs1] += imm
+    write_back_mem(x[rs2], x[rs1])
+
 
 def execute_fsw(imm, rs1, rs2):
     res = float(int(x[rs1], 2)) + imm
     write_back(rs2, res)
 
 
-# R-type instructions: using 3 register inputs (add, xor, mul) - arithmetic/logical operations
+def execute_ecall():
+    sys_call = x[17]  # a7 = x[17]
+    argvs = x[10:17]  # a0-a6 = x[10]-x[16]
+    #if sys_call == 1:  # exit
+    if argvs[0] == 1:
+        print("pass")
+    else:
+        print("fail")
+    sys.exit(argvs[0])
+    #else:
+   #    print("Unknown syscall")
+
+
+def execute_unimp():
+    sys.exit(0)
+
+
+# R-type memory: using 3 register inputs (add, xor, mul) - arithmetic/logical operations
 # 31 ... 25 24 ... 20 19 ... 15 14 ... 12 11 ... 7 6 ...0
 #   funct7      rs2     rs1     funct3      rd      opcode
 #     7         5         5        3        5         7
@@ -136,7 +178,6 @@ def execute_fsw(imm, rs1, rs2):
 
 
 def decode_r_type(instr):
-
     funct7 = instr[-32:-25]
     rs2 = int(instr[-25:-20], 2)
     rs1 = int(instr[-20:-15], 2)
@@ -153,7 +194,7 @@ def decode_r_type(instr):
         execute_rem(rs1, rs2, rd)
 
 
-# I-type instructions: with immediates, loads (addi, lw, jalr, slli) - 2 registers + immediate
+# I-type memory: with immediates, loads (addi, lw, jalr, slli) - 2 registers + immediate
 # 31 ... 20 19 ... 15 14 ... 12 11 ... 7 6 ...0
 # imm[11:0]    rs1     funct3      rd    opcode
 #   12          5          3        5       7
@@ -171,12 +212,12 @@ def decode_r_type(instr):
 # 0100000 + shamt   101         srai
 
 def decode_i_type(instr):
-    imm = from_two_s_compl_bin_to_int(instr[:12])
+    imm = instr[:12]
     if imm[0] == "0":
         imm = "0" * 20 + imm
     else:
         imm = "1" * 20 + imm
-    imm = from_two_s_compl_bin_to_int(imm)
+    imm = from_two_s_compl_bin_to_int(imm, 32)
     shamt = int(instr[-25:-20], 2)
     rs1 = int(instr[-20: -15], 2)
     funct3 = instr[-15:-12]
@@ -208,7 +249,7 @@ def decode_b_type(instr):
         execute_beq(imm, rs1, rs2)
 
 
-# U-type instructions: with upper immediates (lui, auipc)
+# U-type memory: with upper immediates (lui, auipc)
 # 31 ... 12 11 ... 7 6 ...0
 # imm[31:12]    rd   opcode
 #    20         5      7
@@ -223,7 +264,7 @@ def decode_u_type(instr):
         execute_auipc(imm, rd)
 
 
-# UJ-type instructions: jump instructions (jal)
+# UJ-type memory: jump memory (jal)
 # 31 ... 12             11 ... 7 6 ...0
 # imm[20|10:1|11|19:12]    rd   opcode
 #    20
@@ -234,8 +275,7 @@ def decode_j_type(instr):
     execute_jal(offset, rd)
 
 
-
-# S-type instructions: store instructions (sw, sb)
+# S-type memory: store memory (sw, sb)
 # 31 ... 25    24 ... 20 19 ... 15 14 ... 12 11 ... 7 6 ...0
 #   imm[11:5]      rs2     rs1      funct3   imm[4:0] opcode
 #       7          5        5          3        5       7
@@ -258,10 +298,6 @@ def decode_s_type(instr):
         execute_fsw(imm, rs1, rs2)
 
 
-
-
-
-
 def decode(instr):  # figure out what the instruction says to do and get values from the registers that will be used
     opcode = instr[-7:]
     if opcode == "0110011":
@@ -276,10 +312,13 @@ def decode(instr):  # figure out what the instruction says to do and get values 
         decode_u_type(instr)
     elif opcode == "0100011":
         decode_s_type(instr)
+    elif opcode == "1110011":
+        execute_ecall()
 
 
-def fetch(pc):  # get next instruction and increment pc with 4
-    next_instr = instructions[pc] + instructions[pc + 1] + instructions[pc + 2] + instructions[pc + 3]
+def fetch():  # get next instruction and increment pc with 4
+    global pc
+    next_instr = memory[pc] + memory[pc + 1] + memory[pc + 2] + memory[pc + 3]
     instr_bin = '{:032b}'.format(int(next_instr, 16))
     decode(instr_bin)
     pc += 4
@@ -287,7 +326,7 @@ def fetch(pc):  # get next instruction and increment pc with 4
 
 def main():
     global pc
-    input_file_name = sys.argv[1]
+    input_file_name = "rv32ui-v-xor.mc"  # "rv32ui-v-addi.mc"  # .argv[1]
     try:
         with open(input_file_name) as f:
             lines = f.readlines()
@@ -299,19 +338,20 @@ def main():
                 if len(l) == 2 and len(l[0]) == 9 and len(l[1]) == 8 and l[0][:8].isalnum() and l[1].isalnum():
                     addr = int(l[0][:8], 16)
                     addr = addr - 2 ** 31  # subtract 2 ^ 31 from addresses to have lower indexes
-                    while last != addr:  # if the addresses of the instructions are not consecutive we put bytes of 0 between
-                        instructions.append("00")  # so that the program does not execute anything
+                    while last != addr:  # if the addresses of the memory are not consecutive we put bytes of 0 between
+                        memory.append("00")  # so that the program does not execute anything
                         last += 1
-                    instructions.append(l[1][:2])
-                    instructions.append(l[1][2:4])
-                    instructions.append(l[1][4:6])
-                    instructions.append(l[1][6:8])
+                    memory.append(l[1][:2])
+                    memory.append(l[1][2:4])
+                    memory.append(l[1][4:6])
+                    memory.append(l[1][6:8])
                     last += 4
     except FileNotFoundError:
         print("Input file not found!")
     else:
-        while pc + 4 <= len(instructions):
-            fetch(pc)
+        memory.extend(["00"] * 1000000)
+        while pc + 4 <= 200000: # len(memory):
+            fetch()
 
 
 if __name__ == '__main__':
