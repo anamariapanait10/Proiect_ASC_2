@@ -1,8 +1,7 @@
 import sys
 
 memory = []  # bytes array
-# x = [0 for x in range(32)]  # registers x0-x31
-x = [0] * 32
+x = [0] * 32  # registers x0-x31
 pc = 0  # program counter register
 
 
@@ -15,17 +14,23 @@ def from_two_s_compl_bin_to_int(bits, nrBits):
     return sum
 
 
+def unsigned32(signed):
+    return signed % 0x100000000
+
+
 def write_back(rd, res):
     if rd != 0:
         x[rd] = res
 
 
 def write_back_mem(val, addr):
-    val = hex(val)
-    memory[addr] = val[2:4]
-    memory[addr + 1] = val[4:6]
-    memory[addr + 2] = val[6:8]
-    memory[addr + 3] = val[8:10]
+    val = hex(val)[2:10]
+    while len(val) < 8:
+        val = "0" + val
+    memory[addr] = val[0:2]
+    memory[addr + 1] = val[2:4]
+    memory[addr + 2] = val[4:6]
+    memory[addr + 3] = val[6:8]
 
 
 def memory_access_pc(res):
@@ -43,8 +48,14 @@ def execute_ori(rs1, rs2, rd):
 
 
 def execute_srl(rs1, rs2, rd):
-    res = x[rs1] << x[rs2]
-    write_back(rd, res)
+    val = x[rs1]
+    val1 = unsigned32(x[rs2])
+    low5 = int('{:032b}'.format(val1)[-5:], 2)
+    if low5 > 0:
+        shift = unsigned32(x[rs1]) >> low5
+    else:
+        shift = val
+    write_back(rd, shift)
 
 
 def execute_xor(rs1, rs2, rd):
@@ -53,12 +64,15 @@ def execute_xor(rs1, rs2, rd):
 
 
 def execute_rem(rs1, rs2, rd):
-    if x[rs1] < 0:
-        res = -x[rs1]
-        res = (res % x[rs2]) * -1
+    divident = x[rs1]
+    divisor = x[rs2]
+    if divisor != 0:
+        sgn = 1 if divident * divisor > 0 else -1
+        quotient = abs(divident) // abs(divisor) * sgn
+        remainder = divident - divisor * quotient
+        write_back(rd, remainder)
     else:
-        res = x[rs1] % x[rs2]
-    write_back(rd, res)
+        write_back(rd, divident)
 
 
 def execute_addi(imm, rs1, rd):
@@ -77,14 +91,6 @@ def execute_slli(shamt, rs1, rd):
     write_back(rd, res)
 
 
-def execute_srli(shamt, rs1, rd):
-    bits = '{:032b}'.format(x[rs1])
-    bits = "0" * shamt + bits
-    bits = bits[0:32]
-    res = int(bits, 2)
-    write_back(rd, res)
-
-
 def execute_srai(shamt, rs1, rd):
     res = x[rs1] >> shamt
     write_back(rd, res)
@@ -92,7 +98,7 @@ def execute_srai(shamt, rs1, rd):
 
 def execute_lw(imm, rs1, rd):
     addr = imm + x[rs1]
-    res = int(memory_access_load(addr), 16)
+    res = from_two_s_compl_bin_to_int('{:032b}'.format((int(memory_access_load(addr), 16))), 32)
     write_back(rd, res)
 
 
@@ -125,15 +131,14 @@ def execute_lui(imm, rd):
 
 
 def execute_auipc(imm, rd):
-    imm = from_two_s_compl_bin_to_int(imm + "0" * 12)
+    imm = from_two_s_compl_bin_to_int(imm + "0" * 12, 32)
     global pc
     res = imm + pc
     write_back(rd, res)
 
 
 def execute_sw(imm, rs1, rs2):
-    x[rs1] += imm
-    write_back_mem(x[rs2], x[rs1])
+    write_back_mem(unsigned32(x[rs2]), x[rs1] + imm)
 
 
 def execute_fsw(imm, rs1, rs2):
@@ -142,16 +147,12 @@ def execute_fsw(imm, rs1, rs2):
 
 
 def execute_ecall():
-    sys_call = x[17]  # a7 = x[17]
     argvs = x[10:17]  # a0-a6 = x[10]-x[16]
-    #if sys_call == 1:  # exit
     if argvs[0] == 1:
         print("pass")
     else:
         print("fail")
-    sys.exit(argvs[0])
-    #else:
-   #    print("Unknown syscall")
+    sys.exit(0)
 
 
 def execute_unimp():
@@ -181,7 +182,7 @@ def decode_r_type(instr):
     funct7 = instr[-32:-25]
     rs2 = int(instr[-25:-20], 2)
     rs1 = int(instr[-20:-15], 2)
-    funct3 = instr[17:21]
+    funct3 = instr[-15:-12]
     rd = int(instr[-12:-7], 2)
 
     if funct3 == "110" and funct7 == "0000000":  # ori instruction
@@ -230,11 +231,11 @@ def decode_i_type(instr):
         execute_addi(imm, rs1, rd)
     elif funct3 == "001":
         execute_slli(shamt, rs1, rd)
-    elif funct3 == "101":
-        if instr[:7] == "0000000":
-            execute_srli(shamt, rs1, rd)
-        else:
-            execute_srai(shamt, rs1, rd)
+    # elif funct3 == "101":
+    # if instr[:7] == "0000000":
+    #    execute_srli(shamt, rs1, rd)
+    #
+    #   execute_srai(shamt, rs1, rd)
 
 
 def decode_b_type(instr):
@@ -302,13 +303,13 @@ def decode(instr):  # figure out what the instruction says to do and get values 
     opcode = instr[-7:]
     if opcode == "0110011":
         decode_r_type(instr)
-    elif opcode == "0010011":
+    elif opcode == "0010011" or opcode == "0000011":
         decode_i_type(instr)
     elif opcode == "1100011":
         decode_b_type(instr)
     elif opcode == "1101111":
         decode_j_type(instr)
-    elif opcode == "0110111":
+    elif opcode == "0110111" or opcode == "0010111":
         decode_u_type(instr)
     elif opcode == "0100011":
         decode_s_type(instr)
@@ -326,31 +327,39 @@ def fetch():  # get next instruction and increment pc with 4
 
 def main():
     global pc
-    input_file_name = "rv32ui-v-xor.mc"  # "rv32ui-v-addi.mc"  # .argv[1]
+    input_file_name = sys.argv[1]
     try:
         with open(input_file_name) as f:
             lines = f.readlines()
             last = 0
-            for l in lines:
-                l = l.split()
+            for line in lines:
+                line = line.split()
 
                 # check if the current line is an instruction (ex: "8000000c: 00000093" is a valid instruction)
-                if len(l) == 2 and len(l[0]) == 9 and len(l[1]) == 8 and l[0][:8].isalnum() and l[1].isalnum():
-                    addr = int(l[0][:8], 16)
+                if len(line) == 2 and len(line[0]) == 9 and len(line[1]) <= 8 and line[0][:8].isalnum() and line[1].isalnum():
+                    addr = int(line[0][:8], 16)
                     addr = addr - 2 ** 31  # subtract 2 ^ 31 from addresses to have lower indexes
                     while last != addr:  # if the addresses of the memory are not consecutive we put bytes of 0 between
                         memory.append("00")  # so that the program does not execute anything
                         last += 1
-                    memory.append(l[1][:2])
-                    memory.append(l[1][2:4])
-                    memory.append(l[1][4:6])
-                    memory.append(l[1][6:8])
-                    last += 4
+                    if len(line[1]) >= 2:
+                        memory.append(line[1][:2])
+                    if len(line[1]) >= 4:
+                        memory.append(line[1][2:4])
+                    if len(line[1]) >= 6:
+                        memory.append(line[1][4:6])
+                    if len(line[1]) >= 8:
+                        memory.append(line[1][6:8])
+                    if len(line[1]) == 8:
+                        last += 4
+                    else:
+                        last += 2
+
     except FileNotFoundError:
         print("Input file not found!")
     else:
         memory.extend(["00"] * 1000000)
-        while pc + 4 <= 200000: # len(memory):
+        while pc + 4 <= len(memory):
             fetch()
 
 
