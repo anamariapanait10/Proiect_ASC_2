@@ -1,11 +1,10 @@
+```
 # RISC-V executor
 
 ## The objective of the project:
-
-Creating a Python script that executes files that test the most common 32-bit RISC-V 
+This is a Python script that emulates the most common 32-bit RISC-V 
 instructions and displays in console "pass" or "fail" depending on the result
 of the tests. 
-
 
 ### Team name: Unbreakables 2.0
 
@@ -44,3 +43,4 @@ from the memory and, after that, the value of pc is incremented by 4, pointing t
 4. `Memory Access` – this step is necessary, when we need to access data which is not stored in registers
 5. `Write back` – the final step, in the decoding-process, is to load the result of the operation in the appropriate 
    location (a register, or a memory location)
+```
