@@ -1,4 +1,3 @@
-```
 # RISC-V executor
 
 ## The objective of the project:
@@ -43,4 +42,3 @@ from the memory and, after that, the value of pc is incremented by 4, pointing t
 4. `Memory Access` – this step is necessary, when we need to access data which is not stored in registers
 5. `Write back` – the final step, in the decoding-process, is to load the result of the operation in the appropriate 
    location (a register, or a memory location)
-```
